@@ -1,0 +1,187 @@
+<!--
+  Banc de rendu des captures du README (.img/card.png et .img/dark.png).
+
+  La page charge la carte reelle depuis ../dist/carte-train.js et lui donne un
+  objet `hass` reduit : un sensor par trajet, avec les memes attributs que
+  l'integration Train Traveler. Ce qui est photographie est donc le vrai rendu de
+  la carte, pas une maquette HTML.
+
+  Ouvrir directement dans un navigateur pour verifier, ou lancer
+  `tools/screenshot.ps1` pour regenerer les deux PNG.
+  `?dark` bascule sur le theme sombre.
+
+  Les horaires sont calcules a partir de l'heure courante : la capture montre
+  toujours des trains a venir, quelle que soit la date a laquelle elle est
+  refaite. Lignes, durees et modes viennent d'un releve reel de la liaison
+  Orleans - Paris Austerlitz.
+
+  Le titre de la page porte un auto-controle ("OK ..." ou "ERREUR ...") : c'est
+  ce que lit `screenshot.ps1` pour verifier que la carte s'est bien rendue avant
+  de garder la capture.
+-->
+<meta charset="utf-8">
+<title>Train Traveler Card — rendu</title>
+<style>
+  /* Variables de theme de Home Assistant, valeurs par defaut du frontend. */
+  :root {
+    --primary-text-color: #212121;
+    --secondary-text-color: #727272;
+    --divider-color: rgba(0,0,0,.12);
+    --primary-color: #03a9f4;
+    --card-background-color: #fff;
+    --ha-card-background: #fff;
+  }
+  html.dark {
+    --primary-text-color: #e1e1e1;
+    --secondary-text-color: #9b9b9b;
+    --divider-color: rgba(225,225,225,.12);
+    --primary-color: #38a4dd;
+    --card-background-color: #1c1c1c;
+    --ha-card-background: #1c1c1c;
+  }
+  html { background: #f4f5f7; }
+  html.dark { background: #111111; }
+  body {
+    margin: 0; padding: 20px;
+    font-family: Roboto, "Segoe UI", system-ui, sans-serif;
+    color: var(--primary-text-color);
+  }
+  /* Largeur de la capture : les 8 colonnes tiennent sans barre de defilement et
+     sans renvoi a la ligne de la direction, qui est la plus longue. */
+  #host { width: 1320px; }
+</style>
+<div id="host"></div>
+
+<script>
+  /* Doublure minimale de `ha-card` : le frontend n'est pas la, mais la carte
+     n'attend de lui qu'un `header` et un conteneur. */
+  class HaCard extends HTMLElement {
+    constructor() {
+      super();
+      this.attachShadow({ mode: "open" });
+      this.shadowRoot.innerHTML =
+        '<style>' +
+        ':host { display: block; background: var(--ha-card-background, var(--card-background-color));' +
+        '  border-radius: 12px; box-shadow: 0 2px 2px rgba(0,0,0,.12); color: var(--primary-text-color); }' +
+        '.header { font-size: 24px; font-weight: 400; letter-spacing: -.012em; line-height: 32px;' +
+        '  padding: 12px 16px 8px; }' +
+        '.header:empty { display: none; }' +
+        '</style><div class="header"></div><slot></slot>';
+    }
+    set header(value) {
+      this.shadowRoot.querySelector(".header").textContent = value || "";
+    }
+  }
+  customElements.define("ha-card", HaCard);
+</script>
+
+<!-- Module, comme la ressource declaree dans Home Assistant. -->
+<script type="module" src="../dist/carte-train.js"></script>
+
+<!-- Module lui aussi : un script classique s'executerait avant le module de la
+     carte, et `train-traveler-card` ne serait pas encore defini. -->
+<script type="module">
+  await customElements.whenDefined("train-traveler-card");
+
+  const MINUTE = 60000;
+  const base = Date.now();
+
+  /* `in` = minutes avant le depart, `run` = duree du trajet en minutes.
+     `delay` est en secondes, comme l'attribut de l'integration. */
+  const ROUTES = [
+    {
+      id: "sensor.train_traveler_orl_par_journeys",
+      name: "Orléans - Paris Austerlitz",
+      from: "Orléans (Orléans)",
+      to: "Paris Austerlitz (Paris)",
+      journeys: [
+        { in: 11,  run: 65,  line: "K8+", mode: "TER / Intercités", delay: null },
+        { in: 54,  run: 96,  line: "P8",  mode: "TER / Intercités", delay: 420 },
+        { in: 119, run: 65,  line: "K8+", mode: "TER / Intercités", delay: null,
+          disruption: { disruption_type: "REDUCED_SERVICE",
+                        disruption_message: "Service réduit sur l'axe, trains supprimés en heure creuse." } },
+        { in: 240, run: 64,  line: "K8+", mode: "TER / Intercités", delay: 4500 },
+        { in: 360, run: 65,  line: "K8+", mode: "TER / Intercités", delay: null }
+      ]
+    },
+    {
+      id: "sensor.train_traveler_par_orl_journeys",
+      name: "Paris Austerlitz - Orléans",
+      from: "Paris Austerlitz (Paris)",
+      to: "Orléans (Orléans)",
+      journeys: [
+        { in: 26,  run: 62,  line: "K8+", mode: "TER / Intercités", delay: null },
+        { in: 86,  run: 103, line: "P8",  mode: "TER / Intercités", delay: 90 },
+        { in: 205, run: 62,  line: "K8+", mode: "TER / Intercités", delay: null }
+      ]
+    }
+  ];
+
+  /* Le `hass` minimal que lit la carte : uniquement `states`. */
+  const states = {};
+  ROUTES.forEach(function (route) {
+    const journeys = route.journeys.map(function (j) {
+      const departure = new Date(base + j.in * MINUTE);
+      const arrival = new Date(departure.getTime() + j.run * MINUTE);
+      return {
+        line: j.line,
+        direction: route.to,
+        departure_time: departure.toISOString(),
+        arrival_time: arrival.toISOString(),
+        duration: j.run * 60,
+        physical_mode: j.mode,
+        departure: route.from,
+        arrival: route.to,
+        disruptions: j.disruption ? [j.disruption] : [],
+        delay: j.delay
+      };
+    });
+    states[route.id] = {
+      state: journeys[0].departure_time,
+      attributes: {
+        journeys: journeys,
+        device_class: "timestamp",
+        friendly_name: route.name
+      }
+    };
+  });
+
+  const card = document.createElement("train-traveler-card");
+  card.setConfig({
+    type: "custom:train-traveler-card",
+    title: "Prochains trains",
+    /* La capture doit montrer chaque colonne reconnue, sauf `from` / `to` et
+       `disruption` qui repetent la direction et allongent la ligne. */
+    columns: ["route", "departure", "arrival", "duration", "physical_mode", "status", "line", "direction"],
+    sort: "departure"
+  });
+  /* `locale.language` fixe la langue de la carte : le README etant en francais,
+     les captures le sont aussi. Mettre "en" ici produit la version anglaise. */
+  card.hass = { states: states, locale: { language: "fr" } };
+  document.getElementById("host").appendChild(card);
+
+  if (location.search.indexOf("dark") !== -1) {
+    document.documentElement.classList.add("dark");
+  }
+
+  /* Auto-controle. Le rendu se fait dans un shadow root : sans cette lecture,
+     une carte muette produirait une capture vide sans que rien ne le signale.
+     Le resultat passe par `document.title`, que `--dump-dom` restitue. */
+  try {
+    const root = card.shadowRoot;
+    const rows = root.querySelectorAll("tbody tr").length;
+    const cols = root.querySelectorAll("thead th").length;
+    const countdown = root.querySelector(".countdown");
+    const expected = ROUTES.reduce(function (n, r) { return n + r.journeys.length; }, 0);
+    const problems = [];
+    if (rows !== expected) problems.push("lignes: " + rows + " au lieu de " + expected);
+    if (cols !== 8) problems.push("colonnes: " + cols + " au lieu de 8");
+    if (!countdown || !countdown.textContent) problems.push("compte à rebours absent");
+    if (!root.querySelector("td.col-status span")) problems.push("colonne statut vide");
+    document.title = problems.length
+      ? "ERREUR — " + problems.join(" · ")
+      : "OK — " + rows + " lignes / " + cols + " colonnes / " + countdown.textContent;
+  } catch (err) {
+    document.title = "ERREUR — " + err.message;
+  }
+</script>

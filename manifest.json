@@ -1,0 +1,12 @@
+{
+  "domain": "train_traveler_card",
+  "name": "Train Traveler Card",
+  "codeowners": ["@Pulpyyyy"],
+  "config_flow": false,
+  "documentation": "https://github.com/Pulpyyyy/carte-train",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/Pulpyyyy/carte-train/issues",
+  "requirements": [],
+  "version": "1.0.0",
+  "homeassistant": "2024.4.0"
+}
